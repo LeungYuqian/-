@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隨機郵箱與Google帳號創建</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f0f0; }
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 20px; }
+        #email-display { font-size: 18px; padding: 10px; background: #e0ffe0; border: 1px solid #ccc; border-radius: 4px; }
+        #generate-btn { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        #generate-btn:hover { background-color: #0056b3; }
+        #inbox { max-height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; background: #f9f9f9; border-radius: 4px; }
+        .message { padding: 5px; border-bottom: 1px solid #eee; }
+        #google-iframe { width: 100%; height: 600px; border: 1px solid #ccc; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>隨機郵箱與Google帳號創建</h2>
+        <div id="email-display">點擊生成郵箱</div>
+        <button id="generate-btn">生成新郵箱並創建Google帳號</button>
+        <div id="inbox">
+            <p>收件箱訊息將顯示在這裡...</p>
+        </div>
+        <iframe id="google-iframe" src="about:blank"></iframe>
+    </div>
+
+    <script>
+        const API_BASE = 'https://api.mail.tm';
+        let currentToken = null;
+        let currentEmail = null;
+
+        // 隨機生成字符串
+        function randomString(length) {
+            const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+            let result = '';
+            for (let i = 0; i < length; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        // 延遲函數
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // 創建新郵箱
+        async function createEmail() {
+            const username = randomString(10);
+            const password = randomString(12);
+            const email = `${username}@mail.tm`;
+
+            try {
+                const response = await fetch(`${API_BASE}/accounts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: email, password: password })
+                });
+                if (!response.ok) throw new Error('創建失敗');
+                const account = await response.json();
+
+                const tokenResponse = await fetch(`${API_BASE}/token`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address: email, password: password })
+                });
+                const tokenData = await tokenResponse.json();
+                currentToken = tokenData.token;
+                currentEmail = email;
+
+                document.getElementById('email-display').textContent = `你的郵箱: ${currentEmail}`;
+                console.log(`郵箱密碼: ${password} (用於登錄)`);
+
+                checkInbox();
+                createGoogleAccount();
+            } catch (error) {
+                console.error('創建郵箱失敗:', error);
+                document.getElementById('email-display').textContent = '生成失敗，請重試';
+            }
+        }
+
+        // 檢查收件箱
+        async function checkInbox() {
+            if (!currentToken) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/messages`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                const messages = await response.json();
+                const inbox = document.getElementById('inbox');
+                inbox.innerHTML = '';
+
+                if (messages.length === 0) {
+                    inbox.innerHTML = '<p>暫無訊息</p>';
+                } else {
+                    messages.forEach(msg => {
+                        const div = document.createElement('div');
+                        div.className = 'message';
+                        div.innerHTML = `<strong>來自:</strong> ${msg.from.address}<br>
+                                        <strong>主題:</strong> ${msg.subject || '無主題'}<br>
+                                        <p>${msg.intro || '無內容預覽'}</p>`;
+                        inbox.appendChild(div);
+                    });
+                }
+            } catch (error) {
+                console.error('檢查收件箱失敗:', error);
+            }
+
+            setTimeout(checkInbox, 10000);
+        }
+
+        // 在iframe中創建Google帳號
+        async function createGoogleAccount() {
+            const iframe = document.getElementById('google-iframe');
+            iframe.src = 'https://accounts.google.com/signup';
+
+            iframe.onload = async () => {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                if (!iframeDoc) {
+                    console.error('無法訪問iframe內容');
+                    return;
+                }
+
+                try {
+                    const firstName = randomString(5);
+                    const lastName = randomString(5);
+                    const password = `${randomString(8)}!${Math.floor(Math.random() * 1000)}`;
+
+                    // 等待表單元素載入
+                    await new Promise(resolve => {
+                        const check = () => iframeDoc.querySelector('#firstName') ? resolve() : setTimeout(check, 500);
+                        check();
+                    });
+
+                    // 填寫表單
+                    iframeDoc.querySelector('#firstName').value = firstName;
+                    iframeDoc.querySelector('#lastName').value = lastName;
+                    iframeDoc.querySelector('#username').value = currentEmail.split('@')[0];
+                    iframeDoc.querySelector('#passwd').value = password;
+                    iframeDoc.querySelector('#confirm-passwd').value = password;
+
+                    console.log(`正在創建: ${currentEmail} | 密碼: ${password}`);
+
+                    // 點擊「下一步」
+                    iframeDoc.querySelector('#accountDetailsNext').click();
+
+                    // 提示用戶手動處理驗證
+                    alert('請在收件箱查看Google驗證碼，手動輸入到iframe中完成註冊！');
+                } catch (error) {
+                    console.error('iframe操作失敗:', error);
+                }
+            };
+        }
+
+        // 綁定按鈕
+        document.getElementById('generate-btn').addEventListener('click', createEmail);
+
+        // 首次載入
+        createEmail();
+    </script>
+</body>
+</html>
